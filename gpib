@@ -1,0 +1,10 @@
+__version__ =1p0
+"""
+A module for controlling electronic instruments thourgh GPIB
+"""
+
+from import_all import *
+import visa
+import time
+
+

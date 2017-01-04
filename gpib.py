@@ -98,6 +98,31 @@ class GPIB_SetUp(object):
         out_string = out_binary.zfill(digit)
         return out_string
 
+
+    def cal_step_time(self, sdel, nplc, tdel=0, freq=60.):
+        """calculate measurment time in each step.
+        
+        See Appendex A of the KE2400 manual
+        
+        Args:
+        sdel: float, source deleay [s]
+        nplc: float, nplc [cycle]
+        tdel: float, trigger dekay [s]
+        freq: float, frequency of the power source [Hz]
+
+        Ret:
+        total time: float, total time for measureing each step
+        """
+        TRIG_WAIT = 255e-6 #[s]
+        SOURCE_SET = 50e-6 #[s]
+        FARMWAER_OVERHEAD = 1.8e-3 #[s] for V source measurement
+        
+        source_on = SOURCE_SET + sdel + 3 * (nplc * float(1/freq) + 185e-6) + FARMWAER_OVERHEAD
+        
+        total_time = TRIG_WAIT + tdel + source_on
+        
+        return total_time
+
           
 class KE2400(GPIB_SetUp):
     """controls Keithley source meter 2400"""
@@ -129,8 +154,10 @@ class KE2400(GPIB_SetUp):
         trg_cnt = round(abs(v_start - v_end)/v_step + 1)
         s_trg_cnt = str(trg_cnt)
         
-        sweep_time = (sdel + nplc * (0.01667 + ADD_TIME)) * trg_cnt
+        sweep_time = self.cal_step_time(sdel, nplc) * trg_cnt
         print 'est. scan time = %d [s]' %sweep_time
+
+        self.inst.timeout = int(sweep_time * 2)
         
         inpt = self.inst.write('*RST') #reset
         inpt = self.inst.write(':SOUR:CLE:AUTO ON') #set auto out-put off
@@ -143,19 +170,8 @@ class KE2400(GPIB_SetUp):
         inpt = self.inst.write(':SOUR:VOLT:MODE SWE') #set sweep mode
         inpt = self.inst.write(':TRIG:COUN ' + s_trg_cnt) #set triger count = (start-end)/step + 1
         inpt = self.inst.write(':SOUR:DEL ' + str(sdel)) #set source delay
-        inpt = self.inst.write(':INIT') #start sweep
-        
-        time.sleep(TIME_LAG)
 
-        while True:
-            time.sleep(1)
-            opr = self.inst.query(':STAT:OPER:EVEN?')
-            reg = self.read_register(opr, 16)
-            if reg[-11]=='1': #if "idle"(B11) is on 
-                print 'scan completed'
-                break
-                
-        buffer_out = self.inst.query(':FETC?')
+        buffer_out = self.inst.query(':READ?') #start sweep and wait for return
         
         return buffer_out
 

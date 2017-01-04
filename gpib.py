@@ -40,7 +40,7 @@ class GPIB_SetUp(object):
             raise AddressError(msg)
 
 
-    def conv_buffer2df(self, buffer_out, path_filename):
+    def conv_buffer2df(self, buffer_out, path_filename, auto_save=True):
         """Convert raw buffer data to DataFrame and save as a csv file.
         
         Args:
@@ -60,7 +60,8 @@ class GPIB_SetUp(object):
         out_df = pd.DataFrame(out_np2,
                               columns=['Voltage', 'Current', 'Registance', 'Time', 'Status']) #default output
         
-        out_df.to_csv(path_filename + '.csv')
+        if auto_save:
+            out_df.to_csv(path_filename + '.csv')
 
         return out_df
 
@@ -351,3 +352,137 @@ class KE2400(GPIB_SetUp):
             self.plot_buffer_df(out_df, filename)
 
         return out_df
+
+
+class Conductivity(GPIB_SetUp):
+    """conductivity measurement using KE6220 and KE2400"""
+
+
+    def __init__(self, gpib_add1, gpib_add2):
+        """gpib_add1 for KE6220, gpib_add2 for KE2400"""
+        
+        rm = visa.ResourceManager(VISA_PATH)
+        self.K6220 = rm.open_resource(gpib_add1)
+        self.K2400 = rm.open_resource(gpib_add2)
+
+        self.K6220_info = self.K6220.query('*IDN?')
+        self.K2400_info = self.K2400.query('*IDN?')
+
+        self.confirm_unique_name(self.K6220_info, '6220')
+        self.confirm_unique_name(self.K2400_info, '2400')
+        
+
+    def measure(path, filname, gipb_add1='GPIB0::12::INSTR', gpib_add2='GPIB0::13::INSTR',
+                           curr_start=-1e-3, curr_stop=1e-3, curr_step=1e-4,
+                           sour_del=.01, nplc=1, graph=True, 
+                           bias_curr=0., c_cmpl=1., v_cmpl=10.,
+                           swp_rang='BEST', swe_coun=1):
+        """Do conductivity measurment with KE6220 (current source) and KE2400 (source meter)
+        
+        DON'T change sour_del and nplc from the default value unless
+        you really need it.
+        Total step number should be not more than 21.
+        Syncronizing two sweeps is tricky!
+        
+        Args:
+        path: string, path of the directory to save file
+        filename: string, filename
+        curr_start: float, current start value [A]
+        curr_stop: float, current stop value [A]
+        curr_step: float, current sweep step [A]
+        sour_del: float, source deley [s]
+        nplc: float, nplc, if nplc=1, signal is integrated for 16.67 ms [-]
+        graph: boolan, if True, a V-I plot appears
+        bias_curr: float, bias applied by KE2400. SHOULD BE ZERO!
+        c_cmpl: float, compliance current (applied for KE6220)
+        v_cmpl: float, compliance voltage (applied for KE2400)
+        swp_rang: string, refer 'SOUR:SWE:RANG' command for KE6220
+        swe_count: integer, number of sweep. SHOULD BE 1!
+        
+        Rets:
+        new_out_df: pd.DataFrame,
+        columns=['Inpt_current', 'Bias', 'Current', 'Resistance', 'Time', 'Status']
+        
+        """
+
+        path_filename = self.confirm_unique_name(path, filename)
+        
+        step_num = (curr_stop - curr_start)/curr_step + 1
+        sweep_time = self.cal_step_time(sour_del, nplc) * step_num
+        print 'est. meas time : %d [s]' %sweep_time
+        
+        self.K2400.timeout = int(sweep_time * 1000 * 2)
+        
+        ## setup KE6220
+        #basic settings
+        inpt = self.K6220.write('*RST')
+
+        inpt = self.K2400.write(':ARM:SOUR BUS') #set Arm
+        inpt = self.K6220.write(':TRIG:SOUR TLIN') #event detector is trigger link
+        inpt = self.K6220.write(':TRIG:ILIN 1') # triger input signal comes from line 1
+        inpt = self.K6220.write(':TRIG:OLIN 2')# triger input signal send to line 1
+        inpt = self.K6220.write(':TRIG:OUTP DEL') # after deley, triger output signal send to line 1
+        inpt = self.K6220.write(':TRIG:DIR SOUR') #bypass triger at first 
+
+        inpt = self.K6220.write('SOUR:CURR ' + str(bias_curr))
+        inpt = self.K6220.write('SOUR:CURR:COMP ' + str(c_cmpl))
+
+        #setting for sweep 
+        inpt = self.K6220.write('SOUR:SWE:SPAC LIN')
+        inpt = self.K6220.write('SOUR:CURR:STAR ' + str(curr_start))
+        inpt = self.K6220.write('SOUR:CURR:STOP ' + str(curr_stop))
+        inpt = self.K6220.write('SOUR:CURR:STEP ' + str(curr_step))
+        inpt = self.K6220.write('SOUR:DEL ' + str(step_time))
+        inpt = self.K6220.write('SOUR:SWE:RANG ' + swp_rang)
+        inpt = self.K6220.write('SOUR:SWE:COUN ' + str(swe_coun))
+        inpt = self.K6220.write('SOUR:SWE:CAB OFF')
+        inpt = self.K6220.write('SOUR:SWE:ARM')
+        
+        
+        ## setup self.KE2400
+        inpt = self.K2400.write('*RST') #reset
+        
+        inpt = self.K2400.write(':ARM:SOUR IMM') #set Arm
+        inpt = self.K2400.write(':TRIG:ILIN 2') #trigger input line 2 (input from K6220)
+        inpt = self.K2400.write(':TRIG:OLIN 1') #trigger output line 1 (output to K6220)
+        inpt = self.K2400.write(':TRIG:INP SENS') # trigger input to measure event detector (JPN man. 11-15)
+        inpt = self.K2400.write(':TRIG:OUTP SENS') # trigger output after measure action
+        inpt = self.K2400.write(':TRIG:COUN ' + str(step_num)) #set triger count = (start-end)/step + 1
+        
+        inpt = self.K2400.write(':SOUR:CLE:AUTO ON') #turn ON "auto out-put off"
+        inpt = self.K2400.write(':SOUR:FUNC CURR')
+        inpt = self.K2400.write(':SOUR:VOLT:MODE SWE') #set sweep mode
+        inpt = self.K2400.write(':SOUR:CURR:LEV 0') #no current from the source meter
+        inpt = self.K2400.write(':SOUR:DEL ' + str(sour_del)) #set source delay
+        
+        inpt = self.K2400.write(':SENS:FUNC \"VOLT\"') # sense Volt
+        inpt = self.K2400.write(':SENS:VOLT:PROT ' + str(v_cmpl)) #set compliance
+        inpt = self.K2400.write(':SENS:VOLT:NPLC ' + str(nplc)) #set compliance
+        
+        #execute sweep
+        output = self.K2400.query(':READ?')    
+        inpt = self.K6220.write('INIT:IMM')
+
+
+        inpt = self.K6220.write('OUTP OFF')
+        
+        out_df = self.conv_buffer2df(output, path_filename, auto_save=False)
+        input_current_df = pd.DataFrame(np.linspace(curr_start, curr_stop, step_num), columns=['Inpt_current'])
+        new_out_df = pd.concat([input_current_df, out_df],axis=1)
+        new_out_df.to_csv(path_filename + '.csv')
+        
+        #calculate resistance
+        x = np.array(new_out_df['Inpt_current'])
+        y = np.array(new_out_df['Voltage'])
+        reg, b = np.polyfit(x, y, 1)
+        print 'R = %.2e [Ohm]' %reg
+        
+        if graph:
+            f, ax = plt.subplots()
+            ax.plot(x, y, 'o')
+            ax.set_xlabel('Current [A]')
+            ax.set_ylabel('Voltage [V]')
+                           
+        return reg, new_out_df
+
+

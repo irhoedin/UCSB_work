@@ -157,7 +157,7 @@ class KE2400(GPIB_SetUp):
         sweep_time = self.cal_step_time(sdel, nplc) * trg_cnt
         print 'est. scan time = %d [s]' %sweep_time
 
-        self.inst.timeout = int(sweep_time * 2)
+        self.inst.timeout = int(sweep_time * 1000 * 2)
         
         inpt = self.inst.write('*RST') #reset
         inpt = self.inst.write(':SOUR:CLE:AUTO ON') #set auto out-put off

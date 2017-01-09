@@ -79,7 +79,9 @@ class GPIB_SetUp(object):
     def confirm_unique_name(self, path, filename):
         """Confirm the filename is unique or not.
         
-        Return path+filename
+        Return:
+        path+filename: string
+        filename: string
         """
 
         import glob
@@ -114,6 +116,7 @@ class GPIB_SetUp(object):
         Ret:
         total time: float, total time for measureing each step
         """
+
         TRIG_WAIT = 255e-6 #[s]
         SOURCE_SET = 50e-6 #[s]
         FARMWAER_OVERHEAD = 1.8e-3 #[s] for V source measurement
@@ -368,15 +371,16 @@ class Conductivity(GPIB_SetUp):
         self.K6220_info = self.K6220.query('*IDN?')
         self.K2400_info = self.K2400.query('*IDN?')
 
-        self.confirm_unique_name(self.K6220_info, '6220')
-        self.confirm_unique_name(self.K2400_info, '2400')
+        self.confirm_inst(self.K6220_info, '6220')
+        self.confirm_inst(self.K2400_info, '2400')
         
 
-    def measure(path, filname, gipb_add1='GPIB0::12::INSTR', gpib_add2='GPIB0::13::INSTR',
+    def measure(self, path, filename, gipb_add1='GPIB0::12::INSTR', gpib_add2='GPIB0::13::INSTR',
                            curr_start=-1e-3, curr_stop=1e-3, curr_step=1e-4,
                            sour_del=.01, nplc=1, graph=True, 
                            bias_curr=0., c_cmpl=1., v_cmpl=10.,
                            swp_rang='BEST', swe_coun=1):
+
         """Do conductivity measurment with KE6220 (current source) and KE2400 (source meter)
         
         DON'T change sour_del and nplc from the default value unless
@@ -400,12 +404,13 @@ class Conductivity(GPIB_SetUp):
         swe_count: integer, number of sweep. SHOULD BE 1!
         
         Rets:
+        reg: float, registivity [Ohm]
         new_out_df: pd.DataFrame,
         columns=['Inpt_current', 'Bias', 'Current', 'Resistance', 'Time', 'Status']
         
         """
 
-        path_filename = self.confirm_unique_name(path, filename)
+        path_filename, fn = self.confirm_unique_name(path, filename)
         
         step_num = (curr_stop - curr_start)/curr_step + 1
         sweep_time = self.cal_step_time(sour_del, nplc) * step_num
@@ -432,7 +437,7 @@ class Conductivity(GPIB_SetUp):
         inpt = self.K6220.write('SOUR:CURR:STAR ' + str(curr_start))
         inpt = self.K6220.write('SOUR:CURR:STOP ' + str(curr_stop))
         inpt = self.K6220.write('SOUR:CURR:STEP ' + str(curr_step))
-        inpt = self.K6220.write('SOUR:DEL ' + str(step_time))
+        inpt = self.K6220.write('SOUR:DEL ' + str(sour_del))
         inpt = self.K6220.write('SOUR:SWE:RANG ' + swp_rang)
         inpt = self.K6220.write('SOUR:SWE:COUN ' + str(swe_coun))
         inpt = self.K6220.write('SOUR:SWE:CAB OFF')
@@ -460,8 +465,8 @@ class Conductivity(GPIB_SetUp):
         inpt = self.K2400.write(':SENS:VOLT:NPLC ' + str(nplc)) #set compliance
         
         #execute sweep
-        output = self.K2400.query(':READ?')    
         inpt = self.K6220.write('INIT:IMM')
+        output = self.K2400.query(':READ?')    
 
 
         inpt = self.K6220.write('OUTP OFF')

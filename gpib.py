@@ -422,10 +422,9 @@ class Conductivity(GPIB_SetUp):
         #basic settings
         inpt = self.K6220.write('*RST')
 
-        inpt = self.K2400.write(':ARM:SOUR BUS') #set Arm
         inpt = self.K6220.write(':TRIG:SOUR TLIN') #event detector is trigger link
         inpt = self.K6220.write(':TRIG:ILIN 1') # triger input signal comes from line 1
-        inpt = self.K6220.write(':TRIG:OLIN 2')# triger input signal send to line 1
+        inpt = self.K6220.write(':TRIG:OLIN 2')# triger input signal send to line 2
         inpt = self.K6220.write(':TRIG:OUTP DEL') # after deley, triger output signal send to line 1
         inpt = self.K6220.write(':TRIG:DIR SOUR') #bypass triger at first 
 
@@ -467,7 +466,6 @@ class Conductivity(GPIB_SetUp):
         #execute sweep
         inpt = self.K6220.write('INIT:IMM')
         output = self.K2400.query(':READ?')    
-
 
         inpt = self.K6220.write('OUTP OFF')
         

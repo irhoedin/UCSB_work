@@ -7,6 +7,7 @@ from import_all import *
 import visa
 import time
 import datetime
+from scipy import stats
 import matplotlib.ticker as ptick
 
 VISA_PATH = '/Library/Frameworks/Visa.framework/VISA'
@@ -447,6 +448,7 @@ class Conductivity(GPIB_SetUp):
         inpt = self.K2400.write('*RST') #reset
         
         inpt = self.K2400.write(':ARM:SOUR IMM') #set Arm
+        inpt = self.K2400.write(':TRIG:SOUR TLIN') #Use "Triger Link" as trigger, new command (not checked)
         inpt = self.K2400.write(':TRIG:ILIN 2') #trigger input line 2 (input from K6220)
         inpt = self.K2400.write(':TRIG:OLIN 1') #trigger output line 1 (output to K6220)
         inpt = self.K2400.write(':TRIG:INP SENS') # trigger input to measure event detector (JPN man. 11-15)
@@ -477,8 +479,12 @@ class Conductivity(GPIB_SetUp):
         #calculate resistance
         x = np.array(new_out_df['Inpt_current'])
         y = np.array(new_out_df['Voltage'])
-        reg, b = np.polyfit(x, y, 1)
-        print 'R = %.2e [Ohm]' %reg
+        try:
+            reg, b = np.polyfit(x, y, 1)
+            print 'R = %.2e [Ohm]' %reg
+
+        except:
+            print 'regression unsuccessful'
         
         if graph:
             f, ax = plt.subplots()
@@ -487,5 +493,186 @@ class Conductivity(GPIB_SetUp):
             ax.set_ylabel('Voltage [V]')
                            
         return reg, new_out_df
+
+class SeebeckFast(GPIB_SetUp):
+    KE2400ADRS = 'GPIB0::13::INSTR' #Source Meter
+    E3644AADRS = 'GPIB0::7::INSTR' #DC power supply
+    F1529ADRS = 'GPIB0::22::INSTR' #Thermometer readout
+
+    def __init__(self, sourcemeter=KE2400ADRS, power_spply=E3644AADRS, thermometer=F1529ADRS):
+        """initialize the instant.
+
+        sourcemeter: string, GPIB address for source meter. Keithley 2400.
+        power_spply: string, GPIB address for DC power supply. Agilent E3644A.
+        thermocouple: string, GPIB address for thermometer readout. Hart Scientific FLUKE 1529 CHUB E-4.
+        """
+
+        rm = visa.ResourceManager(VISA_PATH)
+        self.K2400 =rm.open_resource(sourcemeter)
+        self.E3644 =rm.open_resource(power_spply)
+        self.F1529 =rm.open_resource(thermometer)
+
+        self.K2400_info = self.K2400.query('*IDN?')
+        self.E3644_info = self.E3644.query('*IDN?')
+        self.F1529_info = self.F1529.query('*IDN?')
+
+        self.confirm_inst(self.K2400_info, '2400')
+        self.confirm_inst(self.E3644_info, '3644')
+        self.confirm_inst(self.F1529_info, '1529')
+
+        #Setup thermometer
+        inpt = self.F1529.write('UNIT:TEMP C')
+
+        inpt = self.F1529.write('ROUT:OPEN 1')
+        inpt = self.F1529.write('ROUT:OPEN 2')
+        inpt = self.F1529.write('ROUT:OPEN 3')
+        inpt = self.F1529.write('ROUT:OPEN 4')
+        
+        inpt = self.F1529.write('ROUT:CLOS 1')
+        inpt = self.F1529.write('ROUT:CLOS 2')
+
+        print 'wait enough for themometer setup'
+
+    def measure(self, path, filename, cycle_time=1., settling_time=75., max_voltage=1.):
+        """measure Seebeck coefficient
+
+        Args:
+        cycle_time: float, period of voltage and temperature readout [s]
+        settling_time: float, time to settle the temperature difference [s]
+        max_voltage: float, maximum voltage to apply to percie from DC source. [V]
+
+        Rets:
+        alpha: float, Seebeck coefficient [V/K]
+        dT_dV: panda.DataFrame, delta T vs delta V
+        raw_data: panda.DataFrame, column=['time', 'voltage', 'delT', 'T1', 'T2']
+        """
+
+        sns.set(style="ticks")
+
+        path_filename, fn = self.confirm_unique_name(path, filename)
+
+
+        #Setup Keithley
+        inpt = self.K2400.write('*RST')
+        inpt = self.K2400.write(':SOUR:FUNC CURR')
+        inpt = self.K2400.write(':SOUR:CURR:MODE FIXED')
+        inpt = self.K2400.write(':SOUR:VOLT:LEV 0')
+        inpt = self.K2400.write(':SENS:FUNC "VOLT"')
+        inpt = self.K2400.write(':SENS:VOLT:PROT 1') #voltage compliance 1 V
+        inpt = self.K2400.write(':SENS:VOLT:RANG 0.01') #Rrange 10 mV
+        inpt = self.K2400.write(':FORM:ELEM VOLT') #output format, only voltage
+        inpt = self.K2400.write(':OUTP ON')
+        
+
+        #Setup DC Power Supply
+        inpt = self.E3644.write('*RST')
+        inpt = self.E3644.write('CURR 3') #Current 3 A, fixed
+        
+        volt_prot = self.E3644.query('VOLT:PROT:STAT?') #over voltage protection? 1 = on, 0 = off
+        if not volt_prot:
+            inpt = self.E3644.write('VOLT:PROT:STAT ON')
+
+        inpt = self.E3644.write('VOLT:PROT 22')
+        inpt = self.E3644.write('VOLT 0')
+        inpt = self.E3644.write('OUTP ON')
+
+        
+        #Start scan
+        time_list = []
+        delT_delV_list = []
+
+        num_of_measure = settling_time/cycle_time
+
+        fig, ax = plt.subplots(1, 2, figsize=(8,4))
+        ax01 = ax[0].twinx()
+        plt.tight_layout()
+        plt.ion()
+
+        fig.show()
+        fig.canvas.draw()
+
+        start_time = datetime.datetime.now()
+
+        for i, voltage in enumerate(np.linspace(-max_voltage, max_voltage, 5)):
+            self.E3644.write('VOLT '+ str(abs(voltage)))
+        
+            if voltage == 0:
+                sys = raw_input('Switch the polarity of DC power and hit Enter!')
+
+            for n in range(int(num_of_measure)):
+                now = datetime.datetime.now()
+                elasped = (now - start_time).total_seconds()
+                voltage = self.K2400.query(':READ?')
+                t1 = self.F1529.query('FETC? 1')
+                t2 = self.F1529.query('FETC? 2')
+
+                time_list.append([elasped, float(voltage), float(t1) - float (t2), float(t1), float(t2)])
+
+                if n > num_of_measure - 5:
+                    delT_delV_list.append([float(t1) - float(t2), float(voltage)])
+
+                df = pd.DataFrame(time_list, columns=['time', 'voltage', 'delT', 'T1', 'T2'])
+                df2 = pd.DataFrame(delT_delV_list, columns=['delT', 'delV'])
+
+                ax[0].clear()
+                ax[1].clear()
+                ax01.clear()
+
+                ax[0].plot(df['time'], df['voltage'], c='blue')
+                ax[0].set_xlabel('time [s]')
+                ax[0].set_ylabel('del V [V]')
+                ax[0].yaxis.label.set_color('blue')
+                ax01.plot(df['time'], df['delT'], c='black')
+                ax01.set_ylabel('del T [K]')
+
+                try:
+                    ax[1].plot(df2['delT'], df2['delV'], 'o')
+
+                    if i > 0:
+                        x = np.array(df2['delT'])
+                        y = np.array(df2['delV'])
+                        
+                        alpha, intercept, r_value, p_value, std_err = stats.linregress(x,y)
+                        y_new = alpha * x + intercept
+                        ax[1].plot(df2['delT'], df2['delV'], 'o')
+                        ax[1].plot(x, y_new, '-', c='blue')
+                        ax[1].set_xlabel('del T [K]')
+                        ax[1].set_ylabel('del V [V]')
+                        ax[1].plot(x, y_new, '-', c='blue')
+                        ax[1].set_title('%0.2e [V/K]' %alpha) 
+
+                except AttributeError:
+                    ax[1].plot([0],[0])
+
+                ax[1].set_xlabel('del T [K]')
+                ax[1].set_ylabel('del V [V]')
+                plt.tight_layout()
+                fig.canvas.draw()
+
+
+                time.sleep(1)
+
+        
+        inpt =self.E3644.write('OUTP OFF')
+        inpt = self.K2400.write('OUTP OFF')
+        inpt = self.K2400.write(':SYST:BEEP:STAT1')
+
+        inpt = self.K2400.write(':SYST:BEEP 1780,0.2')
+        time.sleep(0.2)
+        inpt = self.K2400.write(':SYST:BEEP 1780,0.2')
+        time.sleep(0.2)
+        inpt = self.K2400.write(':SYST:BEEP 1780,0.2')
+
+        df.to_csv(path_filename + '_tl.csv')
+        df2.to_csv(path_filename + '_delTV.csv')
+
+        print 'The Seebeck coefficient is %.2e [K/V]' %alpha
+
+
+        return alpha, time_list, delT_delV_list
+
+
+
+
 
 

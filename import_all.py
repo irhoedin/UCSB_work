@@ -2,12 +2,25 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit 
 import matplotlib.pyplot as plt
+from matplotlib import rc
 import seaborn as sns
+import pylab as pl
 
-sns.set_style("whitegrid")
+#set aesthetics
+sns.set_style("ticks")
 sns.set_context("poster")
 sns.set_palette("husl")
-
+"""
+#set all fonts to Helvetica
+rc('text', usetex=True)
+pl.rcParams['text.latex.preamble'] = [
+    r'\usepackage{tgheros}',  # helvetica font
+    r'\usepackage{sansmath}',  # math-font matching  helvetica
+    r'\sansmath'  # actually tell tex to use it!
+    r'\usepackage{siunitx}',  # micro symbols
+    r'\sisetup{detect-all}',  # force siunitx to use the fonts
+]
+"""
 class U4100(object):
     """Handles text data from U4100 in 1213.
 

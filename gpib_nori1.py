@@ -1115,7 +1115,7 @@ class TFT(GPIB_SetUp):
     smu1_adr= 'GPIB0::13::INSTR' #gate bias
     smu2_adr= 'GPIB0::14::INSTR'  #source-drain
 
-    def __init__(self, gpib1=smuadr, gpib2=picoadr):
+    def __init__(self, gpib1=smu1_adr, gpib2=smu2_adr):
         GPIB_SetUp.__init__(self, gpib1, gpib2)
         self.confirm_inst(self.info[0], '2400')
         self.confirm_inst(self.info[1], '2400')
@@ -1123,7 +1123,15 @@ class TFT(GPIB_SetUp):
     def handler(self, singal, frame):
         """Catch interrupt button on Jupyter"""
         self.inst[0].write('*RST')
+        self.inst[0].write(':DISP:TEXT:DATA "Aborted"')
+        self.inst[0].write(':DISP:TEXT:STAT ON')
+
         self.inst[1].write('*RST')
+        self.inst[1].write(':DISP:TEXT:DATA "Aborted"')
+        self.inst[1].write(':DISP:TEXT:STAT ON')
+        self.inst[1].write(':SYST:BEEP 1000, 0.5')
+        time.sleep(0.6)
+        self.inst[1].write(':SYST:BEEP 784, 0.5')
         print 'Interrupted by user'
         sys.exit(1)
 
@@ -1157,6 +1165,9 @@ class TFT(GPIB_SetUp):
         trg_cnt = round(abs(v_start - v_end) / v_step + 1)
 
         nplc_repeat = int(nplc)/10 + 1
+        if nplc_repeat >= 2:
+            nplc = 10
+        print 'nplc repeat: {}'.format(nplc_repeat)
 
         #set v_sd list_
         if reverse:
@@ -1170,24 +1181,27 @@ class TFT(GPIB_SetUp):
 
         # setup inst[0] (K2400)
         self.inst[0].timeout = int(2000)
-
-
         inpt = self.inst[0].write('*RST')
+        inpt = self.inst[0].write(':DISP:TEXT:STAT OFF')
         inpt = self.inst[0].write(':SOUR:FUNC VOLT')
         inpt = self.inst[0].write(':SOUR:VOLT:MODE FIXED')
         inpt = self.inst[0].write(':SOUR:VOLT:RANG 120')
         inpt = self.inst[0].write(':SOUR:VOLT:LEV 0')
         inpt = self.inst[0].write(':SENS:CURR:PROT ' + str(cmpl))
+        inpt = self.inst[0].write(':SENS:CURR:NPLC ' + str(nplc))
         inpt = self.inst[0].write(':SENS:FUNC "CURR"')
         inpt = self.inst[0].write(':FORM:ELEM CURR')
 
         # setup inst[1]
+        self.inst[1].timeout = int(2000)
         inpt = self.inst[1].write('*RST')
+        inpt = self.inst[1].write(':DISP:TEXT:STAT OFF')
         inpt = self.inst[1].write(':SOUR:FUNC VOLT')
         inpt = self.inst[1].write(':SOUR:VOLT:MODE FIXED')
         inpt = self.inst[1].write(':SOUR:VOLT:RANG 120')
         inpt = self.inst[1].write(':SOUR:VOLT:LEV 0')
         inpt = self.inst[1].write(':SENS:CURR:PROT ' + str(cmpl))
+        inpt = self.inst[1].write(':SENS:CURR:NPLC ' + str(nplc))
         inpt = self.inst[1].write(':SENS:FUNC "CURR"')
         inpt = self.inst[1].write(':FORM:ELEM CURR')
 
@@ -1224,13 +1238,13 @@ class TFT(GPIB_SetUp):
 
 
                 full_isd_list[i].append(i_sd)
-                full_igd_list[i].append(i_vd)
+                full_igd_list[i].append(i_gd)
                 full_vsd_list[i].append(v_sd)
 
                 #plot iv
                 ax[0].clear()
                 for volt, curr in zip(full_vsd_list, full_isd_list):
-                    ax[0].plot(volt, curr)
+                    ax[0].plot(volt, np.absolute(curr))
                 ax[0].set_xlabel('V_SD [V]')
                 ax[0].set_ylabel('I_SD [A]')
                 ax[0].set_title(filename + ' Vsd')
@@ -1238,7 +1252,7 @@ class TFT(GPIB_SetUp):
 
                 ax[1].clear()
                 for volt, curr in zip(full_vsd_list, full_igd_list):
-                    ax[1].plot(volt, curr)
+                    ax[1].plot(volt, np.absolute(curr))
                 ax[1].set_xlabel('V_GD [V]')
                 ax[1].set_ylabel('I_{SD} [A]')
                 ax[1].set_title(filename + ' Vgd')
@@ -1263,6 +1277,13 @@ class TFT(GPIB_SetUp):
         df_all['Vsd'] = full_vsd_lsit[0]
 
         df_all.to_csv(path_file + '.csv')
+
+        self.inst[0].write(':DISP:TEXT:DATA "Done"')
+        self.inst[0].write(':DISP:TEXT:STAT ON')
+
+        self.inst[1].write(':DISP:TEXT:DATA "Done"')
+        self.inst[1].write(':DISP:TEXT:STAT ON')
+        self.inst[1].write(':SYST:BEEP 1800,1.0')
 
         return df
 
@@ -1293,6 +1314,9 @@ class TFT(GPIB_SetUp):
         trg_cnt = round(abs(v_start - v_end) / v_step + 1)
 
         nplc_repeat = int(nplc)/10 + 1
+        if nplc_repeat >= 2:
+            nplc = 10
+        print 'nplc repeat: {}'.format(nplc_repeat)
 
         #set v_sd list_
         if reverse:
@@ -1306,23 +1330,27 @@ class TFT(GPIB_SetUp):
 
         # setup inst[0]
         self.inst[0].timeout = int(2000)
-
         inpt = self.inst[0].write('*RST')
+        inpt = self.inst[0].write(':DISP:TEXT:STAT OFF')
         inpt = self.inst[0].write(':SOUR:FUNC VOLT')
         inpt = self.inst[0].write(':SOUR:VOLT:MODE FIXED')
         inpt = self.inst[0].write(':SOUR:VOLT:RANG 120')
         inpt = self.inst[0].write(':SOUR:VOLT:LEV 0')
         inpt = self.inst[0].write(':SENS:CURR:PROT ' + str(cmpl))
+        inpt = self.inst[0].write(':SENS:CURR:NPLC ' + str(nplc))
         inpt = self.inst[0].write(':SENS:FUNC "CURR"')
         inpt = self.inst[0].write(':FORM:ELEM CURR')
 
         # setup inst[1]
+        self.inst[1].timeout = int(2000)
         inpt = self.inst[1].write('*RST')
+        inpt = self.inst[1].write(':DISP:TEXT:STAT OFF')
         inpt = self.inst[1].write(':SOUR:FUNC VOLT')
         inpt = self.inst[1].write(':SOUR:VOLT:MODE FIXED')
         inpt = self.inst[1].write(':SOUR:VOLT:RANG 120')
         inpt = self.inst[1].write(':SOUR:VOLT:LEV 0')
         inpt = self.inst[1].write(':SENS:CURR:PROT ' + str(cmpl))
+        inpt = self.inst[1].write(':SENS:CURR:NPLC ' + str(nplc))
         inpt = self.inst[1].write(':SENS:FUNC "CURR"')
         inpt = self.inst[1].write(':FORM:ELEM CURR')
 
@@ -1351,14 +1379,14 @@ class TFT(GPIB_SetUp):
 
                 i_sd, i_gd = 0., 0.
                 for rep in range(nplc_repeat):
-                    outp_i_g = self.inst[0].query('READ?')
+                    outp_i_gd = self.inst[0].query('READ?')
                     outp_i_sd = self.inst[1].query('READ?')
 
                     i_sd += float(outp_i_sd)
-                    i_g += float(outp_i_g)
+                    i_gd += float(outp_i_gd)
 
                 full_isd_list[i].append(i_sd)
-                full_ig_list[i].append(i_g)
+                full_ig_list[i].append(i_gd)
                 full_v_list[i].append(v_g)
 
                 #plot iv
@@ -1389,8 +1417,15 @@ class TFT(GPIB_SetUp):
 
         df_all.to_csv(path_file + '.csv')
 
+        self.inst[0].write(':DISP:TEXT:DATA "Done"')
+        self.inst[0].write(':DISP:TEXT:STAT ON')
+
+        self.inst[1].write(':DISP:TEXT:DATA "Done"')
+        self.inst[1].write(':DISP:TEXT:STAT ON')
+        self.inst[1].write(':SYST:BEEP 1800,1.0')
+
         return df_all
-    
+
 
 class Picoammeter(GPIB_SetUp):
     PAM_ADRS = 'GPIB0::11::INSTR'

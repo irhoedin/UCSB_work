@@ -1138,7 +1138,7 @@ class TFT(GPIB_SetUp):
     def meas_output(self, path, filename, v_start=0., v_end=100., v_step=5.,
                     v_g_list=np.linspace(0., 100., 6.),
                     reverse=True, cmpl=0.1, nplc=6,
-                    waiting_time=0.01):
+                    wait=0.01):
 
         """ measure output characteristic
 
@@ -1164,9 +1164,13 @@ class TFT(GPIB_SetUp):
 
         trg_cnt = round(abs(v_start - v_end) / v_step + 1)
 
-        nplc_repeat = int(nplc)/10 + 1
-        if nplc_repeat >= 2:
+        if nplc < 10:
+            nplc_repeat = 1
+
+        else:
+            nplc_repeat = int(nplc)/10
             nplc = 10
+
         print 'nplc repeat: {}'.format(nplc_repeat)
 
         #set v_sd list_
@@ -1179,13 +1183,12 @@ class TFT(GPIB_SetUp):
         else:
             v_sd_list = np.linspace(v_start, v_end, trg_cnt)
 
-        # setup inst[0] (K2400)
+        # setup inst[0]
         self.inst[0].timeout = int(2000)
         inpt = self.inst[0].write('*RST')
         inpt = self.inst[0].write(':DISP:TEXT:STAT OFF')
         inpt = self.inst[0].write(':SOUR:FUNC VOLT')
         inpt = self.inst[0].write(':SOUR:VOLT:MODE FIXED')
-        inpt = self.inst[0].write(':SOUR:VOLT:RANG 120')
         inpt = self.inst[0].write(':SOUR:VOLT:LEV 0')
         inpt = self.inst[0].write(':SENS:CURR:PROT ' + str(cmpl))
         inpt = self.inst[0].write(':SENS:CURR:NPLC ' + str(nplc))
@@ -1198,7 +1201,6 @@ class TFT(GPIB_SetUp):
         inpt = self.inst[1].write(':DISP:TEXT:STAT OFF')
         inpt = self.inst[1].write(':SOUR:FUNC VOLT')
         inpt = self.inst[1].write(':SOUR:VOLT:MODE FIXED')
-        inpt = self.inst[1].write(':SOUR:VOLT:RANG 120')
         inpt = self.inst[1].write(':SOUR:VOLT:LEV 0')
         inpt = self.inst[1].write(':SENS:CURR:PROT ' + str(cmpl))
         inpt = self.inst[1].write(':SENS:CURR:NPLC ' + str(nplc))
@@ -1210,10 +1212,10 @@ class TFT(GPIB_SetUp):
         inpt = self.inst[1].write(':OUTP ON')
 
         #prep for figure
-        fig, ax = plt.subplots(1, 2, figsize=(8,4))
+        fig, ax = plt.subplots(1, 2, figsize=(10,5))
         plt.ion()
-        plt.tight_layout()
         fig.show()
+        fig.suptitle(filename, fontsize=16)
         fig.canvas.draw()
 
         full_isd_list = []
@@ -1227,7 +1229,7 @@ class TFT(GPIB_SetUp):
 
             for v_sd in v_sd_list:
                 inpt = self.inst[1].write('SOUR:VOLT:LEV ' + str(v_sd))
-                time.sleep(waiting_time)
+                time.sleep(wait)
 
                 i_sd, i_gd = 0., 0.
                 for rep in range(nplc_repeat):
@@ -1245,19 +1247,17 @@ class TFT(GPIB_SetUp):
                 ax[0].clear()
                 for volt, curr in zip(full_vsd_list, full_isd_list):
                     ax[0].plot(volt, np.absolute(curr))
-                ax[0].set_xlabel('V_SD [V]')
-                ax[0].set_ylabel('I_SD [A]')
-                ax[0].set_title(filename + ' Vsd')
-                ax[0].set_yscale('log')
+                ax[0].set_xlabel('V_SD (V)')
+                ax[0].set_ylabel('I_SD (A)')
+                ax[0].set_title('Vsd')
 
                 ax[1].clear()
                 for volt, curr in zip(full_vsd_list, full_igd_list):
                     ax[1].plot(volt, np.absolute(curr))
-                ax[1].set_xlabel('V_GD [V]')
-                ax[1].set_ylabel('I_{SD} [A]')
-                ax[1].set_title(filename + ' Vgd')
-                ax[1].set_yscale('log')
-
+                ax[1].set_xlabel('V_GD (V)')
+                ax[1].set_ylabel('I_SD (A)')
+                ax[1].set_title('Vgd')
+                plt.tight_layout()
                 fig.canvas.draw()
 
                 """print "Vg = {0:0.1f}, Vsd = {1:0.1f}, I_sd = {2:0.3e}".format(
@@ -1270,11 +1270,11 @@ class TFT(GPIB_SetUp):
         df_isd = pd.DataFrame(full_isd_list).T
         df_isd.columns = ['Isd_Vg'+str(int(v_g)) for v_g in v_g_list]
 
-        df_ig = pd.DataFrame(full_ig_list).T
+        df_ig = pd.DataFrame(full_igd_list).T
         df_ig.columns = ['Ig_Vg'+str(int(v_g)) for v_g in v_g_list]
 
         df_all = pd.concat([df_isd, df_ig], axis=1)
-        df_all['Vsd'] = full_vsd_lsit[0]
+        df_all['Vsd'] = full_vsd_list[0]
 
         df_all.to_csv(path_file + '.csv')
 
@@ -1285,7 +1285,7 @@ class TFT(GPIB_SetUp):
         self.inst[1].write(':DISP:TEXT:STAT ON')
         self.inst[1].write(':SYST:BEEP 1800,1.0')
 
-        return df
+        return df_all
 
     def meas_transfer(self, path, filename, v_start=-10., v_end=100.,
                       v_step=5., v_sd_list=[20.,50.,80.],
@@ -1313,9 +1313,13 @@ class TFT(GPIB_SetUp):
 
         trg_cnt = round(abs(v_start - v_end) / v_step + 1)
 
-        nplc_repeat = int(nplc)/10 + 1
-        if nplc_repeat >= 2:
+        if nplc < 10:
+            nplc_repeat = 1
+
+        else:
+            nplc_repeat = int(nplc)/10
             nplc = 10
+
         print 'nplc repeat: {}'.format(nplc_repeat)
 
         #set v_sd list_
@@ -1334,7 +1338,7 @@ class TFT(GPIB_SetUp):
         inpt = self.inst[0].write(':DISP:TEXT:STAT OFF')
         inpt = self.inst[0].write(':SOUR:FUNC VOLT')
         inpt = self.inst[0].write(':SOUR:VOLT:MODE FIXED')
-        inpt = self.inst[0].write(':SOUR:VOLT:RANG 120')
+        #inpt = self.inst[0].write(':SOUR:VOLT:RANG 120')
         inpt = self.inst[0].write(':SOUR:VOLT:LEV 0')
         inpt = self.inst[0].write(':SENS:CURR:PROT ' + str(cmpl))
         inpt = self.inst[0].write(':SENS:CURR:NPLC ' + str(nplc))
@@ -1347,7 +1351,7 @@ class TFT(GPIB_SetUp):
         inpt = self.inst[1].write(':DISP:TEXT:STAT OFF')
         inpt = self.inst[1].write(':SOUR:FUNC VOLT')
         inpt = self.inst[1].write(':SOUR:VOLT:MODE FIXED')
-        inpt = self.inst[1].write(':SOUR:VOLT:RANG 120')
+        #inpt = self.inst[1].write(':SOUR:VOLT:RANG 120')
         inpt = self.inst[1].write(':SOUR:VOLT:LEV 0')
         inpt = self.inst[1].write(':SENS:CURR:PROT ' + str(cmpl))
         inpt = self.inst[1].write(':SENS:CURR:NPLC ' + str(nplc))
@@ -1397,10 +1401,11 @@ class TFT(GPIB_SetUp):
                 for volt, curr_g in zip(full_v_list, full_ig_list):
                     ax.plot(volt, np.absolute(curr_g), color='blue')
 
-                ax.set_xlabel('V_{G} [V]')
-                ax.set_ylabel('I_SD/GD [A]')
+                ax.set_xlabel('V_G (V)')
+                ax.set_ylabel('I_SD/GD (A)')
                 ax.set_yscale('log')
                 ax.set_title(filename)
+                plt.tight_layout()
                 fig.canvas.draw()
 
         inpt = self.inst[0].write('OUTP OFF')
